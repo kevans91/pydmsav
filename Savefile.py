@@ -15,13 +15,6 @@ class ListType(Enum):
 	Plain = 0x00
 	Associative = 0x01
 
-class ParserContext:
-	def __init__(self):
-		self.offset = 0
-		self.entryOffset = 0
-		self.dataOffset = 0
-		self.dataStart = 0
-
 def readShort(data):
 	return unpack('<h', data)[0]
 
@@ -53,11 +46,9 @@ class FileEntry:
 		return 11 + len(self.name) + len(self.data)
 
 class EntryHeader:
-	def __init__(self, entry, context):
+	def __init__(self, entry):
 		self.raw = entry.raw
-		self.context = context
 		self.Read()
-		self.context.dataStart = self.Size() + 5
 
 	def Read(self):
 		self.entryIndex = readInt(self.raw[0:4])
@@ -77,21 +68,18 @@ class EntryHeader:
 class EntryData:
 	stringTypes = [EntryType.String, EntryType.Path, EntryType.Object]
 
-	def __init__(self, entry, context):
+	def __init__(self, entry):
 		self.entry = entry
 		self.raw = entry.raw
-		self.context = context
 		self.listType = None
 		self.dataRaw = entry.raw[entry.header.Size():]
 		self.Read()
 
 	def Read(self):
-			
 		self.size = readInt(self.dataRaw[0:4]) 
 		self.value = None
 		if self.size > 0:
 			self.type = EntryType(self.dataRaw[4] ^ (0x40 - 6))
-			self.context.dataOffset = self.context.dataStart + 5
 	
 			dataSlice = self.dataRaw[5:(5 + self.size) - 1]
 			dataArray = []
@@ -105,6 +93,12 @@ class EntryData:
 					dataArray.append((dataSlice[i] ^ (0x43 + (9 * i))) & 0xFF)
 
 				self._ReadValue(self.type, bytearray(dataArray))
+
+	def toString(self):
+		if 'type' in dir(self):
+			if self.type in self.stringTypes or self.type == EntryType.Float:
+				return str(self.value)
+		return ""
 
 	def _ReadValue(self, type, dataArray):
 		if type in self.stringTypes:
@@ -176,11 +170,16 @@ class EntryData:
 		return self.size + 4
 
 class Entry:
-	def __init__(self, entryData, offset, context):
+	def __init__(self, entryData, offset):
 		self.raw = entryData
 		self.offset = offset
-		self.header = EntryHeader(self, context)
-		self.data = EntryData(self, context)
+		self.header = EntryHeader(self)
+		self.data = EntryData(self)
+
+	def toString(self):
+		if len(self.header.name) > 0:
+			return self.header.name + " = " + self.data.toString()
+		return ""
 
 class Savefile:
 	def __init__(self, fileObj):
@@ -196,17 +195,20 @@ class Savefile:
 			return False
 
 		self.data = self.file.read()
-		self.context = ParserContext()
 		self.entries = []
+		offset = 0
 
-		while self.context.offset < len(self.data):
-			self.context.entryOffset = self.context.offset
-			entrySize = unpack('<i', self.data[self.context.offset:self.context.offset+4])[0]
-			self.context.offset = self.context.offset + 4
-			readEntry = (self.data[self.context.offset] == 1)
-			self.context.offset = self.context.offset + 1
+		while offset < len(self.data):
+			entrySize = unpack('<i', self.data[offset:offset+4])[0]
+			offset = offset + 4
+			readEntry = (self.data[offset] == 1)
+			offset = offset + 1
 
 			if readEntry:
-				self.entries.append(Entry(self.data[self.context.offset:self.context.offset + entrySize], self.context.offset - 5, self.context))
+				self.entries.append(Entry(self.data[offset:offset + entrySize], offset - 5))
 	
-			self.context.offset = self.context.offset + entrySize
+			offset = offset + entrySize
+
+	def toString(self):
+		lines = [i.toString() for i in self.entries]
+		return "\r\n".join([line for line in lines if len(line) > 0])
