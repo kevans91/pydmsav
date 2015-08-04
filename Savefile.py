@@ -105,7 +105,6 @@ class EntryData:
 					dataArray.append((dataSlice[i] ^ (0x43 + (9 * i))) & 0xFF)
 
 				self._ReadValue(self.type, bytearray(dataArray))
-				print(self.value)
 
 	def _ReadValue(self, type, dataArray):
 		if type in self.stringTypes:
