@@ -85,8 +85,6 @@ class EntryData:
 			dataArray = []
 
 			if self.type != EntryType.Null:
-				# String, File, Path, Float, Object, List
-
 				dataSize = len(dataSlice)
 		
 				for i in range(0, dataSize):
@@ -98,6 +96,12 @@ class EntryData:
 		if 'type' in dir(self):
 			if self.type in self.stringTypes or self.type == EntryType.Float:
 				return str(self.value)
+
+			if self.type == EntryType.List:
+				if self.listType == ListType.Plain:
+					return 'list(' + (','.join(self.value)) + ')'
+				else:
+					return 'list(' + (','.join([str(k) + '=' + str(v) for k,v in self.value.items()])) + ')'
 		return ""
 
 	def _ReadValue(self, type, dataArray):
