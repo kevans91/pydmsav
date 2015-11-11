@@ -9,7 +9,6 @@ class EntryType(Enum):
 	Float = 0x04
 
 	Object = 0x0B
-		# I suspect this is a file reference, but not completely sure
 	ObjectReference = 0x0C 
 	List = 0x0D
 
