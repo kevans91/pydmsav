@@ -9,6 +9,8 @@ class EntryType(Enum):
 	Float = 0x04
 
 	Object = 0x0B
+		# I suspect this is a file reference, but not completely sure
+	ObjectReference = 0x0C 
 	List = 0x0D
 
 class ListType(Enum):
@@ -91,17 +93,42 @@ class EntryData:
 					dataArray.append((dataSlice[i] ^ (0x43 + (9 * i))) & 0xFF)
 
 				self._ReadValue(self.type, bytearray(dataArray))
+			else:
+				self.value = None
+
+	def __expand(self, value):
+			# If it's a string, just return itself
+		if isinstance(value, str) or isinstance(value, float) or isinstance(value, FileEntry):
+			return str(value)
+
+		strValues = []
+
+		if "items" in dir(value):
+			for k,v in value.items():
+				strValues.append(str(k) + '=' + self.__expand(v))
+		else:
+			for v in value:
+				strValues.append(self.__expand(v))
+
+		return 'list(' + (','.join(strValues)) + ')'
 
 	def __str__(self):
 		if 'type' in dir(self):
 			if self.type in self.stringTypes or self.type == EntryType.Float:
 				return str(self.value)
+			elif self.type == EntryType.ObjectReference:
+				return "object(" + self.value + "," + str(self.param)
+			elif self.type == EntryType.List:
+				return self.__expand(self.value)
 
-			if self.type == EntryType.List:
-				if self.listType == ListType.Plain:
-					return 'list(' + (','.join(self.value)) + ')'
-				else:
-					return 'list(' + (','.join([str(k) + '=' + str(v) for k,v in self.value.items()])) + ')'
+		return ""
+
+	def __raw__(self):
+		if 'type' in dir(self):
+			if self.type in self.stringTypes or self.type == EntryType.Float or self.type == EntryType.ObjectReference:
+				return str(self.value)
+			elif self.type == EntryType.List:
+				return self.value
 		return ""
 
 	def _ReadValue(self, type, dataArray):
@@ -109,6 +136,11 @@ class EntryData:
 			self.valueSize = readShort(dataArray[0:2])
 			self.value = dataArray[2:(2 + self.valueSize)].decode('utf-8')
 			return self.valueSize + 2
+		elif type == EntryType.ObjectReference:
+			self.valueSize = readShort(dataArray[0:2])
+			self.value = dataArray[2:(2 + self.valueSize)].decode('utf-8')
+			self.param = readInt(dataArray[(2 + self.valueSize):])
+			return self.valueSize + 6
 		elif type == EntryType.Float:
 			self.value = readFloat(dataArray[0:4])	
 			return 4
@@ -155,12 +187,13 @@ class EntryData:
 						assocMode = not assocMode
 
 					listKey = self.value
-					dataType = EntryType(dataArray[i])
-					i = i + 1
-					sz = self._ReadValue(dataType, dataArray[i:])
-					listVal = self.value
-					i = i + sz
-					value[listKey] = listVal
+					if i < len(dataArray):
+						dataType = EntryType(dataArray[i])
+						i = i + 1
+						sz = self._ReadValue(dataType, dataArray[i:])
+						listVal = self.value
+						i = i + sz
+						value[listKey] = listVal
 				else:
 					value.append(self.value)
 	
@@ -177,18 +210,33 @@ class Entry:
 	def __init__(self, entryData, offset):
 		self.raw = entryData
 		self.offset = offset
+		self.parent = None
+		self.children = []
+		self.depth = 0
 		self.header = EntryHeader(self)
 		self.data = EntryData(self)
 
 	def __str__(self):
 		if len(self.header.name) > 0:
-			return self.header.name + " = " + str(self.data)
+			return ("\t" * (self.depth - 1)) + self.header.name + " = " + str(self.data)
 		return ""
+
+	def __raw__(self):
+		if len(self.children) > 0:
+			retValue = {}
+
+			for entry in self.children:
+				(k,v) = entry.__raw__()
+				retValue[k] = v
+
+			return (self.header.name, retValue) 
+		else:
+			return (self.header.name, self.data.__raw__())
 
 class Savefile:
 	def __init__(self, fileObj):
 		self.setFile(fileObj)
-	
+
 	def setFile(self, fileObj):
 		self.file = fileObj
 		ret = self.Parse()
@@ -200,7 +248,12 @@ class Savefile:
 
 		self.data = self.file.read()
 		self.entries = []
+		self.entryMap = {}
+		self.root = None
+		self.compat = None
+
 		offset = 0
+		numEntry = 0
 
 		while offset < len(self.data):
 			entrySize = unpack('<i', self.data[offset:offset+4])[0]
@@ -209,9 +262,34 @@ class Savefile:
 			offset = offset + 1
 
 			if readEntry:
-				self.entries.append(Entry(self.data[offset:offset + entrySize], offset - 5))
-	
+				nextEntry = Entry(self.data[offset:offset + entrySize], offset - 5)
+				entryIdx = nextEntry.header.entryIndex
+				parentIdx = nextEntry.header.dirIndex
+
+				if parentIdx in self.entryMap:
+					nextEntry.parent = self.entryMap[parentIdx]
+					nextEntry.parent.children.append(nextEntry)	
+					nextEntry.depth = nextEntry.parent.depth + 1
+
+				self.entryMap[entryIdx] = nextEntry
+
+					# The first entry will never be the root-- it's compatibility information
+				if (self.root is None) and numEntry > 0:
+					self.root = nextEntry 
+					nextEntry.depth = 0
+				elif numEntry == 0:
+					self.compat = nextEntry
+
+				self.entries.append(nextEntry)	
+
 			offset = offset + entrySize
+			numEntry = numEntry + 1
 
 	def __str__(self):
 		return "\r\n".join([str(entry) for entry in self.entries if len(str(entry)) > 0])
+
+	def __raw__(self):
+		if "root" in dir(self):
+			(k, v) = self.root.__raw__()
+			return v
+		return {}
