@@ -92,7 +92,7 @@ class EntryData:
 
 				self._ReadValue(self.type, bytearray(dataArray))
 
-	def toString(self):
+	def __str__(self):
 		if 'type' in dir(self):
 			if self.type in self.stringTypes or self.type == EntryType.Float:
 				return str(self.value)
@@ -180,9 +180,9 @@ class Entry:
 		self.header = EntryHeader(self)
 		self.data = EntryData(self)
 
-	def toString(self):
+	def __str__(self):
 		if len(self.header.name) > 0:
-			return self.header.name + " = " + self.data.toString()
+			return self.header.name + " = " + str(self.data)
 		return ""
 
 class Savefile:
@@ -213,6 +213,5 @@ class Savefile:
 	
 			offset = offset + entrySize
 
-	def toString(self):
-		lines = [i.toString() for i in self.entries]
-		return "\r\n".join([line for line in lines if len(line) > 0])
+	def __str__(self):
+		return "\r\n".join([str(entry) for entry in self.entries if len(str(entry)) > 0])
